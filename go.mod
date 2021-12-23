@@ -1,6 +1,6 @@
 module github.com/alphaqiu/ginrpc
 
-go 1.17
+go 1.16
 
 require (
 	github.com/gin-contrib/gzip v0.0.5 // indirect
