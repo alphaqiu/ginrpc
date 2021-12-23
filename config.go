@@ -1,7 +1,7 @@
 package ginrpc
 
 import (
-	"ginrpc/payload"
+	"github.com/alphaqiu/ginrpc/payload"
 	"github.com/gin-gonic/gin"
 	"time"
 )

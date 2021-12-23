@@ -1,8 +1,8 @@
 package inventory
 
 import (
-	"ginrpc/mock/model"
-	"ginrpc/payload"
+	"github.com/alphaqiu/ginrpc/mock/model"
+	"github.com/alphaqiu/ginrpc/payload"
 	"github.com/pkg/errors"
 	"net/http"
 

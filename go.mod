@@ -1,4 +1,4 @@
-module ginrpc
+module github.com/alphaqiu/ginrpc
 
 go 1.17
 

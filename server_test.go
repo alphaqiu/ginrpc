@@ -2,10 +2,10 @@ package ginrpc
 
 import (
 	"bytes"
-	"ginrpc/middleware/gzip"
-	"ginrpc/middleware/not_found"
-	"ginrpc/mock/request"
-	"ginrpc/mock/services/inventory"
+	"github.com/alphaqiu/ginrpc/middleware/gzip"
+	"github.com/alphaqiu/ginrpc/middleware/not_found"
+	"github.com/alphaqiu/ginrpc/mock/request"
+	"github.com/alphaqiu/ginrpc/mock/services/inventory"
 	logging "github.com/ipfs/go-log/v2"
 	"io"
 	"net/http"
@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	ginLogging "ginrpc/middleware/logging"
-	"ginrpc/middleware/recover"
+	ginLogging "github.com/alphaqiu/ginrpc/middleware/logging"
+	"github.com/alphaqiu/ginrpc/middleware/recover"
 )
 
 type testReq struct {

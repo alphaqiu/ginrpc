@@ -2,7 +2,7 @@ package ginrpc
 
 import (
 	"context"
-	"ginrpc/payload"
+	"github.com/alphaqiu/ginrpc/payload"
 	"github.com/gin-gonic/gin"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/pkg/errors"
