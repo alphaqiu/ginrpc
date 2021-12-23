@@ -36,6 +36,7 @@ var (
 		{method: http.MethodPost, url: "/api/v0/inventory/query?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
 		{method: http.MethodPost, url: "/api/v0/inventory/revert?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
 		{method: http.MethodPost, url: "/api/v0/inventory/header?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: http.Header{"x-lab": []string{"wow"}}},
+		{method: http.MethodPost, url: "/api/v0/inventory/list?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
 	}
 )
 

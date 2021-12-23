@@ -66,3 +66,9 @@ func (api *Inventory) Header(item *model.InventoryModel, query model.InventoryQu
 	log.Debugf("Invoke Inventory Query Method[POST] -> query-name: %s, body-name: %s, x-lab header: %s", query.Name, item.Name, xLab)
 	return &payload.DefaultResponse{Code: 200}
 }
+
+func (api *Inventory) List(item *model.InventoryModel, query model.InventoryQuery) ([]*model.InventoryModel, payload.Response) {
+	log.Debugf("Invoke Inventory Query Method[POST] -> query-name: %s, body-name: %s, x-lab header: %s", query.Name, item.Name)
+
+	return []*model.InventoryModel{&model.InventoryModel{Name: "alpha"}}, &payload.DefaultResponse{Code: 200}
+}
