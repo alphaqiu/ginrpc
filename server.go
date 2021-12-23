@@ -143,10 +143,10 @@ func (g *ginServer) Bind(service interface{}) error {
 	actions := make(map[string]*actionInOutParams)
 	for f := 0; f < svcRef.NumMethod(); f++ {
 		method := svcRef.Type().Method(f)
-		if !method.IsExported() {
-			log.Debugf("[1]非Service方法. 无效的方法. 方法签名: %s", method.Type)
-			continue
-		}
+		//if !method.IsExported() {
+		//	log.Debugf("[1]非Service方法. 无效的方法. 方法签名: %s", method.Type)
+		//	continue
+		//}
 
 		reqMethod, resourceName, actionName := parseMethodName(svcRef.Elem().Type(), method.Name)
 		log.Debugf("HTTP Method: %s, %s/%s/%s", reqMethod, g.cnf.UrlPrefix, resourceName, actionName)
