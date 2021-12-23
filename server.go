@@ -34,7 +34,7 @@ func New(cnf *Config) APIServer {
 		httpServer.SetKeepAlivesEnabled(true)
 	}
 
-	return &ginServer{cnf: cnf, router: r, httpServer: httpServer}
+	return &ginServer{cnf: cnf, router: r, httpServer: httpServer, quit: make(chan struct{})}
 }
 
 type APIServer interface {
@@ -52,6 +52,7 @@ type ginServer struct {
 	preInterceptors  []gin.HandlerFunc
 	postInterceptors []gin.HandlerFunc
 	services         []serviceMap
+	quit             chan struct{}
 }
 
 func (g *ginServer) BindPreInterceptor(handlerFuncs ...gin.HandlerFunc) {
@@ -103,7 +104,7 @@ func (g *ginServer) listenAndServe() {
 		}
 	}
 
-	log.Info("http 正常退出")
+	close(g.quit)
 }
 
 func (g *ginServer) Stop(ctx context.Context) error {
@@ -122,7 +123,10 @@ func (g *ginServer) Stop(ctx context.Context) error {
 		if cctx.Err() != nil {
 			return errors.Wrap(cctx.Err(), "停止http遇到了错误")
 		}
-		log.Info("http服务已停止")
+		log.Info("http服务已停止, 正常退出")
+	case <-g.quit:
+		log.Info("http服务已停止, 正常退出")
+		return nil
 	}
 
 	return nil
@@ -398,6 +402,11 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 			iResp = ret[1].Interface()
 		}
 
+		if iResp == nil {
+			g.defaultSuccessResponse(ctx, &payload.DefaultResponse{
+				Code: 200,
+			}, result)
+		}
 		re := iResp.(payload.Response)
 		if re.GetErr() == nil {
 			if g.cnf.SuccessResponseFunc != nil {
@@ -418,6 +427,9 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 
 func (g *ginServer) defaultSuccessResponse(ctx *gin.Context, resp payload.Response, data interface{}) {
 	httpCode := resp.GetCode()
+	if httpCode == 0 {
+		httpCode = http.StatusOK
+	}
 	header := resp.GetHeader()
 	setHeader(ctx, header)
 
@@ -441,6 +453,9 @@ func setHeader(ctx *gin.Context, header http.Header) {
 
 func (g *ginServer) defaultErrResponse(ctx *gin.Context, resp payload.Response, data interface{}) {
 	httpCode := resp.GetCode()
+	if httpCode == 0 {
+		httpCode = http.StatusOK
+	}
 	header := resp.GetHeader()
 	err := resp.GetErr()
 	setHeader(ctx, header)
