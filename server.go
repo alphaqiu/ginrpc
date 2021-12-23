@@ -243,8 +243,8 @@ func (g *ginServer) checkOutParams(methodType reflect.Type) (numParams int, ok b
 	if outCount == 2 {
 		item = methodType.Out(0)
 		if !g.checkResultParam(item) {
-			// 当返回值=2时，第一个参数必须时结构体
-			log.Debugf("[0-3]非Service方法, 无效的返回值. 返回的第一个参数不是结构体: %v", item.Kind())
+			// 当返回值=2时，第一个参数必须时结构体或者Slice
+			log.Debugf("[0-3]非Service方法, 无效的返回值. 返回的第一个参数不是结构体或者Slice: %v", item.Kind())
 			return
 		}
 		return 2, true
@@ -259,7 +259,7 @@ func (g *ginServer) checkResultParam(item reflect.Type) bool {
 	}
 
 	kind = item.Kind()
-	if kind != reflect.Struct {
+	if kind != reflect.Struct && kind != reflect.Slice {
 		return false
 	}
 
