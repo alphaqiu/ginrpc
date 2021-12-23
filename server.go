@@ -406,7 +406,9 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 			g.defaultSuccessResponse(ctx, &payload.DefaultResponse{
 				Code: 200,
 			}, result)
+			return
 		}
+
 		re := iResp.(payload.Response)
 		if re.GetErr() == nil {
 			if g.cnf.SuccessResponseFunc != nil {
