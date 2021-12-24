@@ -2,7 +2,6 @@ package ginrpc
 
 import (
 	"crypto/tls"
-	"github.com/alphaqiu/ginrpc/payload"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/acme/autocert"
 	"net"
@@ -13,8 +12,7 @@ import (
 )
 
 var (
-	respInterface = reflect.TypeOf((*payload.Response)(nil)).Elem()
-	errInterface  = reflect.TypeOf((*error)(nil)).Elem()
+	errInterface = reflect.TypeOf((*error)(nil)).Elem()
 )
 
 // Redirect HTTP requests to HTTPS

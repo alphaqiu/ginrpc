@@ -2,6 +2,8 @@ package ginrpc
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"github.com/alphaqiu/ginrpc/middleware/gzip"
 	"github.com/alphaqiu/ginrpc/middleware/not_found"
 	"github.com/alphaqiu/ginrpc/mock/request"
@@ -27,16 +29,16 @@ type testReq struct {
 
 var (
 	requests = []testReq{
-		{method: http.MethodPost, url: "/api/v0/inventory/add", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
-		{method: http.MethodPost, url: "/api/v0/inventory/remove?name=tom", body: nil, header: nil},
-		{method: http.MethodGet, url: "/api/v0/inventory/remove?name=jerry", body: nil, header: nil},
-		{method: http.MethodGet, url: "/api/v0/inventory/data?name=octopus", body: nil, header: nil},
-		{method: http.MethodGet, url: "/api/v0/inventory/empty?name=octopus", body: nil, header: nil},
-		{method: http.MethodOptions, url: "/api/v0/inventory/empty?name=octopus", body: nil, header: nil},
-		{method: http.MethodPost, url: "/api/v0/inventory/query?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
-		{method: http.MethodPost, url: "/api/v0/inventory/revert?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
-		{method: http.MethodPost, url: "/api/v0/inventory/header?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: http.Header{"x-lab": []string{"wow"}}},
-		{method: http.MethodPost, url: "/api/v0/inventory/list?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
+		{method: http.MethodPost, url: "/api/v1/inventory/add", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
+		{method: http.MethodPost, url: "/api/v1/inventory/remove?name=tom", body: nil, header: nil},
+		{method: http.MethodGet, url: "/api/v1/inventory/remove?name=jerry", body: nil, header: nil},
+		{method: http.MethodGet, url: "/api/v1/inventory/data?name=octopus", body: nil, header: nil},
+		{method: http.MethodGet, url: "/api/v1/inventory/empty?name=octopus", body: nil, header: nil},
+		{method: http.MethodOptions, url: "/api/v1/inventory/empty?name=octopus", body: nil, header: nil},
+		{method: http.MethodPost, url: "/api/v1/inventory/query?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
+		{method: http.MethodPost, url: "/api/v1/inventory/revert?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
+		{method: http.MethodPost, url: "/api/v1/inventory/header?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: http.Header{"x-lab": []string{"wow"}}},
+		{method: http.MethodPost, url: "/api/v1/inventory/list?name=bruce", body: bytes.NewBufferString(`{"name": "alpha"}`), header: nil},
 	}
 )
 
@@ -53,13 +55,27 @@ func TestGinServer_Bind(t *testing.T) {
 	server.router.Use(not_found.NotFound(nil), gzip.Gzip(gzip.BestCompression))
 
 	for _, r := range requests {
-		req := request.NewMockRequest(r.method, r.url, r.body, r.header)
-		w := httptest.NewRecorder()
-		server.router.ServeHTTP(w, req)
-		result, err := httputil.DumpResponse(w.Result(), true)
-		if err != nil {
-			t.Fatalf("请求失败: %+v, cause: %v", r, err)
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+		quit := make(chan struct{})
+		go func(q chan struct{}) {
+			req := request.NewMockRequest(r.method, r.url, r.body, r.header)
+			w := httptest.NewRecorder()
+			server.router.ServeHTTP(w, req)
+			result, err := httputil.DumpResponse(w.Result(), true)
+			if err != nil {
+				fmt.Printf("请求失败: %+v\n", err)
+			}
+			fmt.Printf("Result: %s\n", result)
+			close(quit)
+		}(quit)
+
+		select {
+		case <-quit:
+			t.Logf("正常退出")
+		case <-ctx.Done():
+			t.Logf("超时")
 		}
-		t.Logf("Result: %s", result)
+
+		cancel()
 	}
 }

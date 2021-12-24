@@ -2,7 +2,6 @@ package ginrpc
 
 import (
 	"context"
-	"github.com/alphaqiu/ginrpc/payload"
 	"github.com/gin-gonic/gin"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/pkg/errors"
@@ -34,11 +33,11 @@ func New(cnf *Config) APIServer {
 		httpServer.SetKeepAlivesEnabled(true)
 	}
 
-	return &ginServer{cnf: cnf, router: r, httpServer: httpServer, quit: make(chan struct{})}
+	return &ginServer{cnf: cnf, router: r, httpServer: httpServer}
 }
 
 type APIServer interface {
-	Start(runMode string, sig ...os.Signal) <-chan os.Signal
+	Start(sig ...os.Signal) (context.Context, <-chan os.Signal)
 	Stop(ctx context.Context) error
 	BindPreInterceptor(handlerFuncs ...gin.HandlerFunc)
 	Bind(interface{}) error
@@ -52,7 +51,6 @@ type ginServer struct {
 	preInterceptors  []gin.HandlerFunc
 	postInterceptors []gin.HandlerFunc
 	services         []serviceMap
-	quit             chan struct{}
 }
 
 func (g *ginServer) BindPreInterceptor(handlerFuncs ...gin.HandlerFunc) {
@@ -63,20 +61,22 @@ func (g *ginServer) BindPostInterceptor(handlerFuncs ...gin.HandlerFunc) {
 	g.postInterceptors = append(g.postInterceptors, handlerFuncs...)
 }
 
-func (g *ginServer) Start(runMode string, sig ...os.Signal) <-chan os.Signal {
-	gin.SetMode(runMode)
+func (g *ginServer) Start(sig ...os.Signal) (context.Context, <-chan os.Signal) {
+	gin.SetMode(g.cnf.RunMode)
 	ch := make(chan os.Signal)
 
 	g.router.Use(g.preInterceptors...)
 	g.makeRoutes()
 	g.router.Use(g.postInterceptors...)
 
-	go g.listenAndServe()
+	ctx, cancel := context.WithCancel(context.Background())
+	go g.listenAndServe(cancel)
 	signal.Notify(ch, sig...)
-	return ch
+	return ctx, ch
 }
 
-func (g *ginServer) listenAndServe() {
+func (g *ginServer) listenAndServe(cancel context.CancelFunc) {
+	defer cancel()
 	log.Info("http 服务启动中...")
 
 	if g.cnf.Tls != nil && g.cnf.Tls.Enabled {
@@ -103,12 +103,12 @@ func (g *ginServer) listenAndServe() {
 			return
 		}
 	}
-
-	close(g.quit)
 }
 
 func (g *ginServer) Stop(ctx context.Context) error {
-	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	timeout := g.cnf.ShutdownTimeout
+	delay := timeout + 2*time.Second
+	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	go func() {
 		if err := g.httpServer.Shutdown(ctx); err != nil {
@@ -117,14 +117,14 @@ func (g *ginServer) Stop(ctx context.Context) error {
 	}()
 
 	select {
-	case <-time.After(12 * time.Second):
+	case <-time.After(delay):
 		log.Warn("停止http服务超时, 服务将退出")
 	case <-cctx.Done():
 		if cctx.Err() != nil {
 			return errors.Wrap(cctx.Err(), "停止http遇到了错误")
 		}
 		log.Info("http服务已停止, 正常退出")
-	case <-g.quit:
+	case <-ctx.Done():
 		log.Info("http服务已停止, 正常退出")
 		return nil
 	}
@@ -137,6 +137,11 @@ func (g *ginServer) Bind(service interface{}) error {
 	// action=去掉前缀的方法名
 	// 入參支持绑定JSON和Query，如果入參结构体后缀为Query，则以Query方式解析
 	// 出參最多支持3个参数，最后一个参数必须是error，或者实现了error接口的结构体
+	version := "v0"
+	if vo, ok := service.(ResourceVersion); ok {
+		version = strings.ReplaceAll(strings.Trim(vo.Version(), " "), " ", "_")
+	}
+
 	svcRef := reflect.ValueOf(service)
 	if reflect.Ptr != svcRef.Kind() || svcRef.Elem().Kind() != reflect.Struct {
 		return errors.Wrapf(invalidInstanceErr, "%+v", svcRef)
@@ -146,13 +151,14 @@ func (g *ginServer) Bind(service interface{}) error {
 
 	actions := make(map[string]*actionInOutParams)
 	for f := 0; f < svcRef.NumMethod(); f++ {
-		method := svcRef.Type().Method(f)
+		methodInst := svcRef.Method(f)
+		methodDef := svcRef.Type().Method(f)
 		//if !method.IsExported() {
 		//	log.Debugf("[1]非Service方法. 无效的方法. 方法签名: %s", method.Type)
 		//	continue
 		//}
 
-		reqMethod, resourceName, actionName := parseMethodName(svcRef.Elem().Type(), method.Name)
+		reqMethod, resourceName, actionName := parseMethodName(svcRef.Elem().Type(), methodDef.Name)
 		log.Debugf("HTTP Method: %s, %s/%s/%s", reqMethod, g.cnf.UrlPrefix, resourceName, actionName)
 
 		// contentParam: body 内部的数据绑定，可以是application/json,可以是multipart/form-data,可以是application/x-www-form-urlencoded
@@ -171,25 +177,24 @@ func (g *ginServer) Bind(service interface{}) error {
 		// func(queryParam, header) ginrpc.Response
 		// func(queryParam, contentParam, header) ginrpc.Response
 		// func(contentParam, header) ginrpc.Response
-		numOutParams, ok := g.checkOutParams(method.Type)
+		numOutParams, ok := g.checkOutParams(methodDef.Type, methodInst)
 		if !ok {
 			continue
 		}
 
-		if actionInOutParam := g.initInParams(method); actionInOutParam != nil {
+		if actionInOutParam := g.initInParams(methodDef, methodInst); actionInOutParam != nil {
 			actionInOutParam.ReqMethod = reqMethod
 			actionInOutParam.ResourceName = resourceName
 			actionInOutParam.OutParamNum = numOutParams
-			actionInOutParam.Self = svcRef
-			actionInOutParam.Fn = method.Func
+			actionInOutParam.Fn = methodInst
 			actionInOutParam.ActionName = actionName
-			actions[method.Name] = actionInOutParam
+			actions[methodDef.Name] = actionInOutParam
 		}
 	}
 
 	for _, inOutParams := range actions {
 		handler := g.assignHandler(inOutParams)
-		relativePath := g.relativePath(inOutParams.ResourceName, inOutParams.ActionName)
+		relativePath := g.relativePath(version, inOutParams.ResourceName, inOutParams.ActionName)
 		g.services = append(g.services, serviceMap{
 			Method:       inOutParams.ReqMethod,
 			RelativePath: relativePath,
@@ -225,7 +230,7 @@ func (g *ginServer) makeRoutes() {
 	})
 }
 
-func (g *ginServer) checkOutParams(methodType reflect.Type) (numParams int, ok bool) {
+func (g *ginServer) checkOutParams(methodType reflect.Type, methodInst reflect.Value) (numParams int, ok bool) {
 	outCount := methodType.NumOut()
 	if outCount < 1 || outCount > 2 {
 		// 不符合service的方法，结构体可以定义非服务方法，这类方法过滤，不返回错误
@@ -235,8 +240,8 @@ func (g *ginServer) checkOutParams(methodType reflect.Type) (numParams int, ok b
 
 	item := methodType.Out(outCount - 1)
 	kind := item.Kind()
-	if kind != reflect.Interface && !item.Implements(respInterface) {
-		log.Debugf("[0-2]非Service方法, 无效的返回值. 最后一个参数不是payload.Response: %v", kind)
+	if kind != reflect.Interface && !item.Implements(errInterface) {
+		log.Debugf("[0-2]非Service方法, 无效的返回值. 最后一个参数不是实现了error的接口: Kind: %v, 方法签名: %s", kind, methodInst.Type())
 		return
 	}
 
@@ -266,38 +271,45 @@ func (g *ginServer) checkResultParam(item reflect.Type) bool {
 	return true
 }
 
-func (g *ginServer) initInParams(method reflect.Method) *actionInOutParams {
+func (g *ginServer) initInParams(method reflect.Method, methodInst reflect.Value) *actionInOutParams {
 	inCount := method.Type.NumIn()
-	if inCount > 4 { // 包含方法所属自身引用
-		log.Debugf("[2]非Service方法. 无效的入參. 方法签名: %s", method.Type)
+	if inCount < 2 || inCount > 5 { // 包含方法所属自身引用
+		log.Debugf("[1]非Service方法. 无效的入參. 方法签名: %s", methodInst.Type())
+		return nil
+	}
+
+	param := method.Type.In(1)
+	ctxRef := reflect.TypeOf((*context.Context)(nil)).Elem()
+	if param.Kind() != reflect.Interface && !param.Implements(ctxRef) {
+		log.Debugf("[2]非Service方法. 无效的入參.第一个参数应为Context: Kind: %s, 方法签名: %s", param.Kind(), methodInst.Type())
 		return nil
 	}
 
 	inParam := new(actionInOutParams)
-	for p := 1; p < method.Type.NumIn(); p++ {
-		param := method.Type.In(p)
+	for p := 2; p < method.Type.NumIn(); p++ {
+		param = method.Type.In(p)
 		if param.Kind() == reflect.Ptr {
 			param = param.Elem()
 		}
 
 		isHeader := g.isHttpHeaderSignature(param)
 		if param.Kind() != reflect.Struct && !isHeader {
-			log.Debugf("[3]非Service方法. 无效的入參. 方法签名: %s", method.Type)
+			log.Debugf("[3]非Service方法. 无效的入參. 方法签名: %s", methodInst.Type())
 			return nil
 		}
 
 		if isHeader {
 			inParam.HasHeader = true
-			inParam.HeaderIndex = p
+			inParam.HeaderIndex = p - 1
 		} else if strings.HasSuffix(param.Name(), "Query") {
 			inParam.Query = reflect.New(param)
 			inParam.QueryKind = method.Type.In(p).Kind()
-			inParam.QueryIndex = p
+			inParam.QueryIndex = p - 1
 			inParam.HasQuery = true
 		} else {
 			inParam.Body = reflect.New(param)
 			inParam.BodyKind = method.Type.In(p).Kind()
-			inParam.BodyIndex = p
+			inParam.BodyIndex = p - 1
 			inParam.HasBody = true
 		}
 	}
@@ -349,7 +361,13 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 		}
 
 		inParams = make([]reflect.Value, paramsLen)
-		inParams[0] = inOutParam.Self
+
+		parentCtx := ctx.Request.Context()
+		if parentCtx.Done() == nil {
+			parentCtx = ctx
+		}
+
+		inParams[0] = reflect.ValueOf(parentCtx)
 		if inOutParam.HasHeader {
 			inParams[inOutParam.HeaderIndex] = reflect.ValueOf(ctx.Request.Header)
 		}
@@ -358,7 +376,7 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 			err = ctx.BindQuery(inOutParam.Query.Interface())
 			if err != nil {
 				ctx.Abort()
-				ctx.JSON(http.StatusBadRequest, gin.H{})
+				ctx.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "failed to bind params in query", "error": err.Error()})
 				return
 			}
 
@@ -373,7 +391,7 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 			err = ctx.Bind(inOutParam.Body.Interface())
 			if err != nil {
 				ctx.Abort()
-				ctx.JSON(http.StatusBadRequest, gin.H{"errMsg": err.Error()})
+				ctx.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "failed to bind params in body", "error": err.Error()})
 				return
 			}
 
@@ -403,44 +421,55 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 		}
 
 		if iResp == nil {
-			g.defaultSuccessResponse(ctx, &payload.DefaultResponse{
-				Code: 200,
-			}, result)
+			g.defaultResponse(ctx, result, nil)
 			return
 		}
 
-		re := iResp.(payload.Response)
-		if re.GetErr() == nil {
-			if g.cnf.SuccessResponseFunc != nil {
-				g.cnf.SuccessResponseFunc(ctx, iResp.(payload.Response), result)
-				return
-			}
-			g.defaultSuccessResponse(ctx, iResp.(payload.Response), result)
+		if re, ok := iResp.(Err); ok {
+			g.defaultResponse(ctx, result, re)
 			return
 		}
 
-		if g.cnf.ErrResponseFunc != nil {
-			g.cnf.ErrResponseFunc(ctx, iResp.(payload.Response), result)
+		// internal error 未定义的错误
+		if re, ok := iResp.(error); ok {
+			g.defaultResponse(ctx, result, &internalError{error: re})
 			return
 		}
-		g.defaultErrResponse(ctx, iResp.(payload.Response), result)
+
+		panic("unreachable code")
+
 	}
 }
 
-func (g *ginServer) defaultSuccessResponse(ctx *gin.Context, resp payload.Response, data interface{}) {
-	httpCode := resp.GetCode()
-	if httpCode == 0 {
-		httpCode = http.StatusOK
-	}
-	header := resp.GetHeader()
-	setHeader(ctx, header)
-
-	if data == nil {
-		ctx.AbortWithStatus(httpCode)
+func (g *ginServer) defaultResponse(ctx *gin.Context, data interface{}, resp Err) {
+	ret := gin.H{}
+	if resp == nil && data == nil {
+		ctx.AbortWithStatus(http.StatusOK)
 		return
 	}
 
-	ctx.JSON(httpCode, gin.H{"result": data})
+	if data != nil {
+		ret["result"] = data
+	}
+
+	code := resp.Code()
+	message := resp.Message()
+	//setHeader(ctx, header)
+
+	if code > 0 {
+		ret["code"] = code
+	}
+
+	if message != "" {
+		ret["message"] = message
+	}
+
+	if len(ret) == 0 {
+		ctx.AbortWithStatus(http.StatusOK)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, ret)
 }
 
 func setHeader(ctx *gin.Context, header http.Header) {
@@ -453,29 +482,12 @@ func setHeader(ctx *gin.Context, header http.Header) {
 	}
 }
 
-func (g *ginServer) defaultErrResponse(ctx *gin.Context, resp payload.Response, data interface{}) {
-	httpCode := resp.GetCode()
-	if httpCode == 0 {
-		httpCode = http.StatusOK
-	}
-	header := resp.GetHeader()
-	err := resp.GetErr()
-	setHeader(ctx, header)
-
-	ret := gin.H{"errMsg": err.Error()}
-	if data != nil {
-		ret["result"] = data
-	}
-
-	ctx.JSON(httpCode, ret)
-}
-
-func (g *ginServer) relativePath(resourceName, actionName string) string {
+func (g *ginServer) relativePath(version, resourceName, actionName string) string {
 	if len(g.cnf.UrlPrefix) > 0 {
-		return strings.Join([]string{g.cnf.UrlPrefix, resourceName, actionName}, "/")
+		return strings.Join([]string{g.cnf.UrlPrefix, version, resourceName, actionName}, "/")
 	}
 
-	return strings.Join([]string{resourceName, actionName}, "/")
+	return strings.Join([]string{version, resourceName, actionName}, "/")
 }
 
 type serviceMap struct {
@@ -499,6 +511,5 @@ type actionInOutParams struct {
 	ReqMethod    string
 	ResourceName string
 	ActionName   string
-	Self         reflect.Value
 	Fn           reflect.Value
 }

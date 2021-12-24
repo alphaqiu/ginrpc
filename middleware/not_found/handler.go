@@ -16,5 +16,5 @@ func NotFound(message interface{}) gin.HandlerFunc {
 }
 
 func defaultMessage() gin.H {
-	return gin.H{"errMsg": "Route not allowed"}
+	return gin.H{"code": 404, "message": "API not found", "error": "Route not allowed"}
 }
