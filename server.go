@@ -452,8 +452,17 @@ func (g *ginServer) defaultResponse(ctx *gin.Context, data interface{}, resp Err
 		ret["result"] = data
 	}
 
-	code := resp.Code()
-	message := resp.Message()
+	var (
+		code    int
+		message string
+		errMsg  string
+	)
+	if resp != nil {
+		code = resp.Code()
+		message = resp.Message()
+		errMsg = resp.Error()
+	}
+
 	//setHeader(ctx, header)
 
 	if code > 0 {
@@ -462,6 +471,10 @@ func (g *ginServer) defaultResponse(ctx *gin.Context, data interface{}, resp Err
 
 	if message != "" {
 		ret["message"] = message
+	}
+
+	if errMsg != "" {
+		ret["error"] = errMsg
 	}
 
 	if len(ret) == 0 {
