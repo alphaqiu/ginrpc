@@ -222,8 +222,8 @@ func (g *ginServer) makeRoutes() {
 
 	g.router.Handle(http.MethodGet, api, func(c *gin.Context) {
 		apis := make([]string, len(g.services))
-		for _, item := range g.services {
-			apis = append(apis, item.RelativePath)
+		for idx, item := range g.services {
+			apis[idx] = item.RelativePath
 		}
 
 		c.JSON(http.StatusOK, gin.H{"apis": apis})
