@@ -302,12 +302,12 @@ func (g *ginServer) initInParams(method reflect.Method, methodInst reflect.Value
 			inParam.HasHeader = true
 			inParam.HeaderIndex = p - 1
 		} else if strings.HasSuffix(param.Name(), "Query") {
-			inParam.Query = reflect.New(param)
+			inParam.Query = param
 			inParam.QueryKind = method.Type.In(p).Kind()
 			inParam.QueryIndex = p - 1
 			inParam.HasQuery = true
 		} else {
-			inParam.Body = reflect.New(param)
+			inParam.Body = param
 			inParam.BodyKind = method.Type.In(p).Kind()
 			inParam.BodyIndex = p - 1
 			inParam.HasBody = true
@@ -373,31 +373,31 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 		}
 
 		if inOutParam.HasQuery {
-			err = ctx.BindQuery(inOutParam.Query.Interface())
+			q := reflect.New(inOutParam.Query)
+			err = ctx.BindQuery(q.Interface())
 			if err != nil {
 				ctx.Abort()
 				ctx.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "failed to bind params in query", "error": err.Error()})
 				return
 			}
 
-			q := inOutParam.Query
 			if inOutParam.QueryKind != reflect.Ptr {
-				q = inOutParam.Query.Elem()
+				q = q.Elem()
 			}
 			inParams[inOutParam.QueryIndex] = q
 		}
 
 		if inOutParam.HasBody {
-			err = ctx.Bind(inOutParam.Body.Interface())
+			b := reflect.New(inOutParam.Body)
+			err = ctx.Bind(b.Interface())
 			if err != nil {
 				ctx.Abort()
 				ctx.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "failed to bind params in body", "error": err.Error()})
 				return
 			}
 
-			b := inOutParam.Body
 			if inOutParam.BodyKind != reflect.Ptr {
-				b = inOutParam.Body.Elem()
+				b = b.Elem()
 			}
 			inParams[inOutParam.BodyIndex] = b
 		}
@@ -514,10 +514,10 @@ type actionInOutParams struct {
 	HasBody      bool
 	HasHeader    bool
 	HeaderIndex  int
-	Query        reflect.Value
+	Query        reflect.Type
 	QueryKind    reflect.Kind
 	QueryIndex   int
-	Body         reflect.Value
+	Body         reflect.Type
 	BodyKind     reflect.Kind
 	BodyIndex    int
 	OutParamNum  int
