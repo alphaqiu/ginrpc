@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -325,6 +326,12 @@ func (g *ginServer) isHttpHeaderSignature(ht reflect.Type) bool {
 	return false
 }
 
+func PrintStack() {
+	var buf [4096]byte
+	n := runtime.Stack(buf[:], false)
+	log.Errorf("%s\n", string(buf[:n]))
+}
+
 func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		defer func() {
@@ -338,6 +345,7 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 				log.Errorf("调用Service服务遇到了问题:(%s;%s/%s) %v",
 					inOutParam.ReqMethod, inOutParam.ResourceName, inOutParam.ActionName,
 					e)
+				PrintStack()
 			}
 		}()
 		// gin框架会自动判断绑定的类型，这里只要区分是否含有Query和body内的绑定。
@@ -467,6 +475,8 @@ func (g *ginServer) defaultResponse(ctx *gin.Context, data interface{}, resp Err
 
 	if code > 0 {
 		ret["code"] = code
+	} else if code <= 0 {
+		ret["code"] = 200
 	}
 
 	if message != "" {
