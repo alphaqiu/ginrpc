@@ -2,6 +2,7 @@ package ginrpc
 
 import (
 	"context"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/pkg/errors"
@@ -339,8 +340,10 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 				var e interface{}
 				if reflect.TypeOf(err).Implements(errInterface) {
 					e = errors.WithStack(err.(error)).Error()
+					g.defaultResponse(ctx, nil, &internalError{errors.WithStack(err.(error))})
 				} else {
 					e = err
+					g.defaultResponse(ctx, nil, &internalError{fmt.Errorf("%v", err)})
 				}
 				log.Errorf("调用Service服务遇到了问题:(%s;%s/%s) %v",
 					inOutParam.ReqMethod, inOutParam.ResourceName, inOutParam.ActionName,
