@@ -475,7 +475,7 @@ func (g *ginServer) defaultResponse(ctx *gin.Context, data interface{}, resp Err
 
 	if code > 0 {
 		ret["code"] = code
-	} else if code <= 0 {
+	} else if code <= 0 && data != nil {
 		ret["code"] = 200
 	}
 
