@@ -444,7 +444,7 @@ func (g *ginServer) assignHandler(inOutParam *actionInOutParams) gin.HandlerFunc
 func (g *ginServer) defaultResponse(ctx *gin.Context, data interface{}, resp Err) {
 	ret := gin.H{}
 	if resp == nil && data == nil {
-		ctx.AbortWithStatus(http.StatusOK)
+		ctx.JSON(http.StatusOK, gin.H{"code": 200})
 		return
 	}
 
@@ -478,7 +478,7 @@ func (g *ginServer) defaultResponse(ctx *gin.Context, data interface{}, resp Err
 	}
 
 	if len(ret) == 0 {
-		ctx.AbortWithStatus(http.StatusOK)
+		ctx.JSON(http.StatusOK, gin.H{"code": 200})
 		return
 	}
 
