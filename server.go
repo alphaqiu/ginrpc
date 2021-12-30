@@ -35,11 +35,11 @@ func New(cnf *Config) APIServer {
 		httpServer.SetKeepAlivesEnabled(true)
 	}
 
-	return &ginServer{cnf: cnf, router: r, httpServer: httpServer}
+	return &ginServer{cnf: cnf, router: r, httpServer: httpServer, quit: make(chan struct{})}
 }
 
 type APIServer interface {
-	Start(sig ...os.Signal) (context.Context, <-chan os.Signal)
+	Start(sig ...os.Signal) <-chan os.Signal
 	Stop(ctx context.Context) error
 	BindPreInterceptor(handlerFuncs ...gin.HandlerFunc)
 	Bind(interface{}) error
@@ -53,6 +53,7 @@ type ginServer struct {
 	preInterceptors  []gin.HandlerFunc
 	postInterceptors []gin.HandlerFunc
 	services         []serviceMap
+	quit             chan struct{}
 }
 
 func (g *ginServer) BindPreInterceptor(handlerFuncs ...gin.HandlerFunc) {
@@ -63,7 +64,7 @@ func (g *ginServer) BindPostInterceptor(handlerFuncs ...gin.HandlerFunc) {
 	g.postInterceptors = append(g.postInterceptors, handlerFuncs...)
 }
 
-func (g *ginServer) Start(sig ...os.Signal) (context.Context, <-chan os.Signal) {
+func (g *ginServer) Start(sig ...os.Signal) <-chan os.Signal {
 	gin.SetMode(g.cnf.RunMode)
 	ch := make(chan os.Signal)
 
@@ -71,14 +72,13 @@ func (g *ginServer) Start(sig ...os.Signal) (context.Context, <-chan os.Signal) 
 	g.makeRoutes()
 	g.router.Use(g.postInterceptors...)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go g.listenAndServe(cancel)
+	go g.listenAndServe()
 	signal.Notify(ch, sig...)
-	return ctx, ch
+	return ch
 }
 
-func (g *ginServer) listenAndServe(cancel context.CancelFunc) {
-	defer cancel()
+func (g *ginServer) listenAndServe() {
+	defer close(g.quit)
 	log.Info("http 服务启动中...")
 
 	if g.cnf.Tls != nil && g.cnf.Tls.Enabled {
@@ -126,7 +126,7 @@ func (g *ginServer) Stop(ctx context.Context) error {
 			return errors.Wrap(cctx.Err(), "停止http遇到了错误")
 		}
 		log.Info("http服务已停止, 正常退出")
-	case <-ctx.Done():
+	case <-g.quit:
 		log.Info("http服务已停止, 正常退出")
 		return nil
 	}
@@ -498,15 +498,15 @@ func (g *ginServer) defaultResponse(ctx *gin.Context, data interface{}, resp Err
 	ctx.JSON(http.StatusOK, ret)
 }
 
-func setHeader(ctx *gin.Context, header http.Header) {
-	if header != nil {
-		for k, vs := range header {
-			for _, v := range vs {
-				ctx.Header(k, v)
-			}
-		}
-	}
-}
+//func setHeader(ctx *gin.Context, header http.Header) {
+//	if header != nil {
+//		for k, vs := range header {
+//			for _, v := range vs {
+//				ctx.Header(k, v)
+//			}
+//		}
+//	}
+//}
 
 func (g *ginServer) relativePath(version, resourceName, actionName string) string {
 	if len(g.cnf.UrlPrefix) > 0 {
